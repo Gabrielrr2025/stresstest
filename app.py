@@ -6,20 +6,19 @@ from io import BytesIO
 import openpyxl
 import plotly.express as px
 
-# ===================== CONFIG =====================
+# ============== CONFIG ==============
 st.set_page_config(page_title="Finhealth • VaR", page_icon="📊", layout="wide")
 
-# ===================== CSS (simples e limpo) =====================
+# ============== CSS (limpo + avisos em vermelho) ==============
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 *{font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont}
 :root{
-  --bg:#fafbfc; --card:#ffffff; --text:#111827; --muted:#6b7280; --line:#e5e7eb;
+  --bg:#fafbfc; --card:#fff; --text:#111827; --muted:#6b7280; --line:#e5e7eb;
   --primary:#075aff; --ok:#10b981; --warn:#f59e0b; --err:#ef4444;
 }
 [data-testid="stAppViewContainer"]{background:var(--bg)}
-/* Centraliza e reduz largura do conteúdo principal */
 .block-container{max-width:1100px; padding-top:1rem}
 .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:1rem 1.2rem; margin-bottom:1rem}
 .h1{font-size:1.6rem; font-weight:700; margin:0 0 .25rem}
@@ -34,13 +33,16 @@ st.markdown("""
 .ok{color:var(--ok); background:rgba(16,185,129,.08); border-color:rgba(16,185,129,.25)}
 .warn{color:var(--warn); background:rgba(245,158,11,.08); border-color:rgba(245,158,11,.25)}
 .err{color:var(--err); background:rgba(239,68,68,.08); border-color:rgba(239,68,68,.25)}
+.lbl{font-weight:600; margin-bottom:4px}
+.lbl.missing{color:var(--err)}
+.help-err{color:var(--err); font-size:.85rem; margin-top:.25rem}
 .js-plotly-plot{border:1px solid var(--line); border-radius:12px}
 footer, #MainMenu, header{visibility:hidden}
 .footer{color:#6b7280; text-align:center; padding:1.6rem 0 1rem; border-top:1px solid #ececec; margin-top:1.2rem}
 </style>
 """, unsafe_allow_html=True)
 
-# ===================== CONSTANTES =====================
+# ============== CONSTANTES ==============
 VOL_PADRAO = {
     "Ações (Ibovespa)": 0.25,
     "Juros-Pré": 0.08,
@@ -68,7 +70,7 @@ FATOR_MAP = {
     "Outros": "Outros"
 }
 
-# ===================== HELPERS =====================
+# ============== HELPERS ==============
 def z_value(level: str) -> float:
     return 1.644854 if level == "95%" else 2.326347
 
@@ -82,8 +84,7 @@ def var_portfolio(pl, pesos, sigma_d, h, z, corr=None):
     if corr is None:
         sigma_port_d = np.sqrt(np.sum((w * s) ** 2))
     else:
-        D = np.diag(s)
-        Sigma = D @ corr @ D
+        D = np.diag(s); Sigma = D @ corr @ D
         sigma2 = float(w @ Sigma @ w)
         sigma_port_d = np.sqrt(max(sigma2, 0.0))
     var_total_pct = z * sigma_port_d * np.sqrt(h)
@@ -102,124 +103,159 @@ def impacto_por_fator(fator, carteira_rows, choque):
             impacto += choque * it.get("sens", 1.0) * (it["%PL"]/100.0)
     return impacto  # fração do PL
 
-# ===================== ESTADO =====================
+def label(texto: str, missing: bool=False):
+    st.markdown(f'<div class="lbl{" missing" if missing else ""}">{texto}</div>', unsafe_allow_html=True)
+
+# ============== ESTADO ==============
 if "rodar" not in st.session_state: st.session_state.rodar = False
 if "corr_df" not in st.session_state: st.session_state.corr_df = None
+if "tentou" not in st.session_state: st.session_state.tentou = False
 
-# ===================== SIDEBAR (Parâmetros) =====================
+# ============== SIDEBAR (Parâmetros) ==============
 with st.sidebar:
     st.header("⚙️ Parâmetros")
-    st.caption("Aqui ficam os botões que dizem **como** o risco é calculado.")
+    st.caption("Defina o horizonte, o nível de confiança e a metodologia de agregação do risco.")
 
     horizonte_dias = st.selectbox(
         "Horizonte (dias úteis)",
         [1, 10, 21], index=2,
-        help="Pense nisso como ‘quantos dias vamos olhar para frente’. "
-             "1 dia é curtinho; 21 dias é mais ou menos um mês de pregões."
+        help="Período considerado para o cálculo do VaR."
     )
-
     conf_label = st.selectbox(
         "Confiança",
         ["95%", "99%"], index=0,
-        help="É o quão ‘cauteloso’ queremos ser. 95%: bom e rápido. 99%: mais conservador, "
-             "como colocar um capacete **e** joelheira."
+        help="Probabilidade associada ao nível de perda estimada (quanto maior, mais conservador)."
     )
-
     metodologia = st.radio(
         "Metodologia",
-        ["Sem correlação (soma em quadratura)", "Com correlação (considera ligação entre classes)"],
+        ["Sem correlação (soma em quadratura)", "Com correlação (matriz de correlação)"],
         index=0,
-        help="Sem correlação: imagina que as classes não andam juntas. "
-             "Com correlação: considera que às vezes andam para o mesmo lado (ou lados opostos)."
+        help="Escolha se o portfólio considera dependência entre classes de ativos."
     )
-    usar_corr = (metodologia.startswith("Com correlação"))
+    usar_corr = metodologia.startswith("Com correlação")
 
-# ===================== CABEÇALHO =====================
+# ============== CABEÇALHO ==============
 st.markdown('<div class="card"><div class="h1">📊 Finhealth VaR</div>'
-            '<div style="color:#6b7280">Risco paramétrico por classe • Respostas CVM/B3 • Relatórios</div></div>',
+            '<div style="color:#6b7280">Risco paramétrico por classe • Relatórios e respostas CVM/B3</div></div>',
             unsafe_allow_html=True)
 
-# ===================== DADOS DO FUNDO + ALOCAÇÃO (centralizado) =====================
+# ============== DADOS DO FUNDO + ALOCAÇÃO (CENTRAL) ==============
 with st.form("form_fundo"):
     st.markdown('<div class="card"><div class="h2">🏢 Dados do Fundo</div>', unsafe_allow_html=True)
 
+    # labels custom + inputs com label oculto (para permitir destacar em vermelho)
     c1, c2 = st.columns(2)
     with c1:
-        cnpj = st.text_input(
-            "CNPJ *",
-            placeholder="00.000.000/0001-00",
-            help="É o ‘CPF do fundo’. Se não tiver agora, tudo bem: você pode preencher depois."
-        )
-        nome_fundo = st.text_input(
-            "Nome do Fundo *",
-            placeholder="Fundo XPTO",
-            help="É o ‘nome completo’ do fundo. Escreva como aparece no regulamento."
-        )
+        label("CNPJ *", missing=(st.session_state.tentou and not st.session_state.get("cnpj_val", "").strip()))
+        cnpj = st.text_input("", placeholder="00.000.000/0001-00",
+                             label_visibility="collapsed")
+        if st.session_state.tentou and not cnpj.strip():
+            st.markdown('<div class="help-err">Informe o CNPJ.</div>', unsafe_allow_html=True)
+
+        label("Nome do Fundo *", missing=(st.session_state.tentou and not st.session_state.get("nome_val", "").strip()))
+        nome_fundo = st.text_input("", placeholder="Fundo XPTO",
+                                   label_visibility="collapsed")
+        if st.session_state.tentou and not nome_fundo.strip():
+            st.markdown('<div class="help-err">Informe o nome do fundo.</div>', unsafe_allow_html=True)
+
     with c2:
-        data_ref = st.date_input(
-            "Data de Referência *",
-            value=datetime.date.today(),
-            help="É o ‘dia da foto’. As contas valem para este dia."
-        )
-        pl = st.number_input(
-            "Patrimônio Líquido (R$) *",
-            min_value=0.0, value=1_000_000.0, step=1_000.0, format="%.2f",
-            help="É o total de dinheiro do fundo hoje. Pode ser um valor arredondado para começar."
-        )
+        label("Data de Referência *")
+        data_ref = st.date_input("", value=datetime.date.today(), label_visibility="collapsed")
+
+        pl_missing = st.session_state.tentou and (st.session_state.get("pl_val", 0.0) <= 0)
+        label("Patrimônio Líquido (R$) *", missing=pl_missing)
+        pl = st.number_input("", min_value=0.0, value=1_000_000.0, step=1_000.0, format="%.2f",
+                             label_visibility="collapsed")
+        if st.session_state.tentou and pl <= 0:
+            st.markdown('<div class="help-err">Informe um valor maior que zero.</div>', unsafe_allow_html=True)
+
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="card"><div class="h2">📊 Alocação por Classe</div>', unsafe_allow_html=True)
-    st.caption("Diga quanto do fundo está em cada classe. "
-               "**Vol Anual** é o quanto essa classe balança em 1 ano (0,25 = 25%). "
-               "**Sensibilidade** é o quanto essa classe reage aos choques de cenário. "
-               "Se não souber, deixe **1,0**.")
+    st.caption("Informe a distribuição do patrimônio por classe, a volatilidade anual sugerida e, se aplicável, a sensibilidade.")
 
     carteira, soma = [], 0.0
+    faltas_vol = {}  # para marcar vol faltante quando houver alocação
+
     for classe, vol_sugerida in VOL_PADRAO.items():
         a, b, c = st.columns([1.2, .9, .9])
+
         with a:
-            perc = st.number_input(
-                f"{classe} (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key=f"p_{classe}",
-                help="Quanto dessa classe existe no fundo. A soma de todas deve chegar perto de 100%."
-            )
+            # rótulo + input (sem '?')
+            perc_key = f"p_{classe}"
+            label(f"{classe} (%)")
+            perc = st.number_input("", min_value=0.0, max_value=100.0, value=0.0, step=0.5,
+                                   key=perc_key, label_visibility="collapsed")
+
         with b:
-            vol_a = st.number_input(
-                "Vol Anual",
-                min_value=0.0, max_value=2.0, value=float(vol_sugerida), step=0.01, format="%.2f", key=f"v_{classe}",
-                help=f"Sugestão: {vol_sugerida:.0%}. É a agitação anual típica dessa classe."
-            )
+            vol_key = f"v_{classe}"
+            label("Volatilidade Anual")
+            vol_a = st.number_input("", min_value=0.0, max_value=2.0, value=float(vol_sugerida),
+                                    step=0.01, format="%.2f", key=vol_key,
+                                    label_visibility="collapsed")
+
         with c:
-            sens = st.number_input(
-                "Sensibilidade",
-                min_value=-10.0, max_value=10.0, value=1.0, step=0.1, key=f"s_{classe}",
-                help="Pense como um ‘quanto reage’. 1,0 = reage igual ao choque. 0,5 = reage metade."
-            )
+            sens_key = f"s_{classe}"
+            label("Sensibilidade")
+            sens = st.number_input("", min_value=-10.0, max_value=10.0, value=1.0, step=0.1,
+                                   key=sens_key, label_visibility="collapsed")
 
         if perc > 0:
             carteira.append({"classe": classe, "%PL": perc, "vol_anual": float(vol_a), "sens": float(sens)})
             soma += perc
+            if st.session_state.tentou and vol_a <= 0:
+                faltas_vol[classe] = True
+                st.markdown(f'<div class="help-err">Volatilidade obrigatória para "{classe}".</div>', unsafe_allow_html=True)
 
     # Barra + status
     st.markdown('<div class="progress"><div style="width:{}%"></div></div>'.format(min(soma,100.0)), unsafe_allow_html=True)
     if soma == 100:
-        st.markdown('<span class="badge ok">✅ Alocação perfeita: 100%</span>', unsafe_allow_html=True)
+        st.markdown('<span class="badge ok">✅ Alocação total: 100%</span>', unsafe_allow_html=True)
     elif soma > 100:
-        st.markdown(f'<span class="badge err">❌ Passou do limite: {soma:.1f}%</span>', unsafe_allow_html=True)
+        st.markdown(f'<span class="badge err">❌ A soma ultrapassa 100% ({soma:.1f}%).</span>', unsafe_allow_html=True)
     elif soma > 0:
-        st.markdown(f'<span class="badge warn">⚠️ Ainda falta: {100-soma:.1f}%</span>', unsafe_allow_html=True)
+        st.markdown(f'<span class="badge warn">⚠️ A soma está em {soma:.1f}%. Complete até 100%.</span>', unsafe_allow_html=True)
+    else:
+        if st.session_state.tentou:
+            st.markdown('<span class="badge err">❌ Informe ao menos uma alocação.</span>', unsafe_allow_html=True)
 
-    completar_caixa = st.checkbox("Completar automaticamente com Caixa quando a soma for menor que 100%", value=True,
-                                  help="Se a soma não chegar a 100%, colocamos o resto em ‘Caixa’ (quase sem risco).")
-    submit = st.form_submit_button("🚀 Calcular", disabled=not (cnpj.strip() and nome_fundo.strip() and pl > 0 and soma > 0 and soma <= 100))
+    completar_caixa = st.checkbox("Completar automaticamente com Caixa quando a soma for menor que 100%", value=True)
 
+    # Botão SEM desabilitar — validação após clique
+    submit = st.form_submit_button("🚀 Calcular")
+
+    # ======= Validação =======
     if submit:
-        if soma < 100 and completar_caixa:
-            carteira.append({"classe": "Caixa", "%PL": 100 - soma, "vol_anual": 0.0001, "sens": 0.0})
-            soma = 100.0
-        st.session_state.rodar = True
-        st.session_state.inputs = {"cnpj": cnpj, "nome": nome_fundo, "data": data_ref, "pl": pl, "carteira": carteira}
+        st.session_state.tentou = True
+        missing_msgs = []
 
-# ===================== RESULTADOS =====================
+        if not cnpj.strip():
+            missing_msgs.append("CNPJ")
+        if not nome_fundo.strip():
+            missing_msgs.append("Nome do Fundo")
+        if pl <= 0:
+            missing_msgs.append("Patrimônio Líquido maior que zero")
+        if soma == 0:
+            missing_msgs.append("Informar ao menos uma classe na alocação")
+        if soma > 100:
+            missing_msgs.append("Soma da alocação não pode exceder 100%")
+        for classe, flag in faltas_vol.items():
+            if flag:
+                missing_msgs.append(f'Volatilidade anual para "{classe}"')
+
+        if missing_msgs:
+            st.session_state.rodar = False
+            st.error("Por favor, corrija os campos destacados em vermelho:\n- " + "\n- ".join(missing_msgs))
+        else:
+            if soma < 100 and completar_caixa:
+                carteira.append({"classe": "Caixa", "%PL": 100 - soma, "vol_anual": 0.0001, "sens": 0.0})
+                soma = 100.0
+            st.session_state.rodar = True
+            st.session_state.inputs = {
+                "cnpj": cnpj, "nome": nome_fundo, "data": data_ref, "pl": pl, "carteira": carteira
+            }
+
+# ============== RESULTADOS ==============
 if st.session_state.rodar:
     data = st.session_state.inputs
     pl = data["pl"]
@@ -230,31 +266,25 @@ if st.session_state.rodar:
     sigma_d = np.array([it["vol_anual"]/np.sqrt(252) for it in carteira], dtype=float)
     classes = [it["classe"] for it in carteira]
 
-    # Correlação (se escolhida)
+    # Correlação (opcional)
     corr = None
     if usar_corr:
         if (st.session_state.corr_df is None) or (list(st.session_state.corr_df.index) != classes):
             st.session_state.corr_df = montar_correlacao(classes)
         with st.expander("🔗 Matriz de correlação (opcional)"):
-            st.caption("Se isso parecer complicado, tudo bem: pode deixar como está. Diagonal = 1. As outras células "
-                       "dizem o quanto as classes andam juntas (0 = nada, 1 = totalmente).")
+            st.caption("A matriz deve ser simétrica e ter 1 na diagonal.")
             edit = st.data_editor(st.session_state.corr_df.round(2), num_rows="fixed", use_container_width=True)
-            # forçar simetria e diagonal
-            M = edit.to_numpy(float)
-            M = (M + M.T)/2.0
-            np.fill_diagonal(M, 1.0)
+            M = edit.to_numpy(float); M = (M + M.T)/2.0; np.fill_diagonal(M, 1.0)
             st.session_state.corr_df = pd.DataFrame(M, index=classes, columns=classes)
         corr = st.session_state.corr_df.to_numpy(float)
 
-    # Cálculo principal
-    z = z_value(conf_label)
-    h = int(horizonte_dias)
+    # Cálculo VaR portfólio
+    z = z_value(conf_label); h = int(horizonte_dias)
     var_pct, var_rs, sigma_port_d = var_portfolio(pl, pesos, sigma_d, h, z, corr=corr)
 
-    # VaR isolado por classe (para exibir)
+    # VaR isolado por classe (para exibição)
     var_cls_pct = (z * sigma_d * np.sqrt(h)) * pesos     # fração do PL
     var_cls_rs = var_cls_pct * pl
-
     df_var = pd.DataFrame({
         "classe": classes,
         "%PL": [it["%PL"] for it in carteira],
@@ -283,7 +313,7 @@ if st.session_state.rodar:
     st.dataframe(df_show, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Gráficos (simples)
+    # Gráficos
     g1, g2 = st.columns(2)
     with g1:
         fig = px.pie(df_var, values="%PL", names="classe", title="Distribuição da Carteira")
@@ -314,10 +344,8 @@ if st.session_state.rodar:
     st.markdown('<div class="card"><div class="h2">🏛️ Respostas CVM/B3</div>', unsafe_allow_html=True)
     z95 = 1.644854
     var21_pct = z95 * sigma_port_d * np.sqrt(21) * 100.0
-    pior_stress_pct = 0.0
-    # calcula impacto bruto para pegar o pior:
     brutos = [impacto_por_fator(f, carteira, ch) for f, ch in CENARIOS_PADRAO.items()]
-    if brutos: pior_stress_pct = min(brutos) * 100.0
+    pior_stress_pct = (min(brutos) * 100.0) if brutos else 0.0
 
     def imp_unit(fator, unit=-0.01):
         return impacto_por_fator(fator, carteira, unit) * 100.0
@@ -387,16 +415,13 @@ if st.session_state.rodar:
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     with colC:
         template = st.file_uploader("📋 Template B3/CVM", type=["xlsx"],
-                                    help="Se você subir o modelo oficial, eu tento preencher automaticamente.")
+                                    help="Carregue o modelo oficial para preenchimento automático.")
         if template is not None:
             try:
                 out_t = BytesIO()
-                wb = openpyxl.load_workbook(template)
-                ws = wb.active
-                # perguntas na linha 3, respostas na linha 6 (ajuste se necessário)
-                mapa = {}
-                for col in range(3, ws.max_column+1):
-                    mapa[col] = str(ws.cell(row=3, column=col).value or "").strip().lower()
+                wb = openpyxl.load_workbook(template); ws = wb.active
+                mapa = {col: str(ws.cell(row=3, column=col).value or "").strip().lower()
+                        for col in range(3, ws.max_column+1)}
                 for _, row in df_cvm.iterrows():
                     p = row["Pergunta"].strip().lower()
                     for col, txt in mapa.items():
@@ -409,5 +434,5 @@ if st.session_state.rodar:
             except Exception as e:
                 st.error(f"Erro ao processar template: {e}")
 
-# ===================== RODAPÉ =====================
+# ============== RODAPÉ ==============
 st.markdown('<div class="footer">Feito com ❤️ <b>Finhealth</b></div>', unsafe_allow_html=True)
