@@ -6,43 +6,10 @@ from io import BytesIO
 import openpyxl
 import plotly.express as px
 
-# ============== CONFIG ==============
+# ===================== CONFIG =====================
 st.set_page_config(page_title="Finhealth • VaR", page_icon="📊", layout="wide")
 
-# ============== CSS (limpo + avisos em vermelho) ==============
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-*{font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont}
-:root{
-  --bg:#fafbfc; --card:#fff; --text:#111827; --muted:#6b7280; --line:#e5e7eb;
-  --primary:#075aff; --ok:#10b981; --warn:#f59e0b; --err:#ef4444;
-}
-[data-testid="stAppViewContainer"]{background:var(--bg)}
-.block-container{max-width:1100px; padding-top:1rem}
-.card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:1rem 1.2rem; margin-bottom:1rem}
-.h1{font-size:1.6rem; font-weight:700; margin:0 0 .25rem}
-.h2{font-size:1.05rem; font-weight:700; color:var(--text); border-bottom:1px solid #f2f3f5; padding-bottom:.35rem; margin-bottom:.7rem}
-.kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.8rem}
-.kpi{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1rem; text-align:center}
-.kpv{font-size:1.5rem; font-weight:700; color:var(--primary)}
-.kpl{font-size:.8rem; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:700}
-.progress{height:8px; background:#f3f4f6; border-radius:8px; overflow:hidden; margin:.5rem 0 .7rem}
-.progress > div{height:100%; background:linear-gradient(90deg,#22c55e,#16a34a)}
-.badge{display:inline-block; padding:.35rem .6rem; border-radius:8px; font-weight:600; font-size:.85rem; border:1px solid}
-.ok{color:var(--ok); background:rgba(16,185,129,.08); border-color:rgba(16,185,129,.25)}
-.warn{color:var(--warn); background:rgba(245,158,11,.08); border-color:rgba(245,158,11,.25)}
-.err{color:var(--err); background:rgba(239,68,68,.08); border-color:rgba(239,68,68,.25)}
-.lbl{font-weight:600; margin-bottom:4px}
-.lbl.missing{color:var(--err)}
-.help-err{color:var(--err); font-size:.85rem; margin-top:.25rem}
-.js-plotly-plot{border:1px solid var(--line); border-radius:12px}
-footer, #MainMenu, header{visibility:hidden}
-.footer{color:#6b7280; text-align:center; padding:1.6rem 0 1rem; border-top:1px solid #ececec; margin-top:1.2rem}
-</style>
-""", unsafe_allow_html=True)
-
-# ============== CONSTANTES ==============
+# ===================== CONSTANTES =====================
 VOL_PADRAO = {
     "Ações (Ibovespa)": 0.25,
     "Juros-Pré": 0.08,
@@ -60,6 +27,7 @@ DESC_CENARIO = {
     "Dólar": "Queda de 5% no dólar",
     "Outros": "Queda de 3% em outros ativos"
 }
+# Mapeia classe -> fator para estresse
 FATOR_MAP = {
     "Ações (Ibovespa)": "Ibovespa",
     "Juros-Pré": "Juros-Pré",
@@ -70,7 +38,7 @@ FATOR_MAP = {
     "Outros": "Outros"
 }
 
-# ============== HELPERS ==============
+# ===================== HELPERS =====================
 def z_value(level: str) -> float:
     return 1.644854 if level == "95%" else 2.326347
 
@@ -106,15 +74,21 @@ def impacto_por_fator(fator, carteira_rows, choque):
 def label(texto: str, missing: bool=False):
     st.markdown(f'<div class="lbl{" missing" if missing else ""}">{texto}</div>', unsafe_allow_html=True)
 
-# ============== ESTADO ==============
+# ===================== ESTADO =====================
 if "rodar" not in st.session_state: st.session_state.rodar = False
 if "corr_df" not in st.session_state: st.session_state.corr_df = None
 if "tentou" not in st.session_state: st.session_state.tentou = False
 
-# ============== SIDEBAR (Parâmetros) ==============
+# ===================== SIDEBAR (Parâmetros + Tema) =====================
 with st.sidebar:
     st.header("⚙️ Parâmetros")
-    st.caption("Defina o horizonte, o nível de confiança e a metodologia de agregação do risco.")
+
+    tema = st.selectbox(
+        "Tema",
+        ["Claro", "Escuro"],
+        index=0,
+        help="Altera a aparência do site."
+    )
 
     horizonte_dias = st.selectbox(
         "Horizonte (dias úteis)",
@@ -124,37 +98,98 @@ with st.sidebar:
     conf_label = st.selectbox(
         "Confiança",
         ["95%", "99%"], index=0,
-        help="Probabilidade associada ao nível de perda estimada (quanto maior, mais conservador)."
+        help="Probabilidade associada ao nível de perda estimada."
     )
-    metodologia = st.radio(
+    metodologia = st.selectbox(
         "Metodologia",
         ["Sem correlação (soma em quadratura)", "Com correlação (matriz de correlação)"],
         index=0,
-        help="Escolha se o portfólio considera dependência entre classes de ativos."
+        help="Define se o portfólio considera dependência entre classes de ativos."
     )
     usar_corr = metodologia.startswith("Com correlação")
 
-# ============== CABEÇALHO ==============
+# ===================== TEMA (CSS dinâmico) =====================
+CSS_LIGHT = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+:root{
+  --bg:#fafbfc; --card:#ffffff; --text:#111827; --muted:#6b7280; --line:#e5e7eb;
+  --primary:#075aff; --ok:#10b981; --warn:#f59e0b; --err:#ef4444;
+}
+*{font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont}
+[data-testid="stAppViewContainer"]{background:var(--bg)}
+.block-container{max-width:1100px; padding-top:1rem}
+.card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:1rem 1.2rem; margin-bottom:1rem}
+.h1{font-size:1.6rem; font-weight:700; margin:0 0 .25rem}
+.h2{font-size:1.05rem; font-weight:700; color:var(--text); border-bottom:1px solid #f2f3f5; padding-bottom:.35rem; margin-bottom:.7rem}
+.kpi{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1rem; text-align:center}
+.kpv{font-size:1.5rem; font-weight:700; color:var(--primary)}
+.kpl{font-size:.8rem; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:700}
+.progress{height:8px; background:#f3f4f6; border-radius:8px; overflow:hidden; margin:.5rem 0 .7rem}
+.progress > div{height:100%; background:linear-gradient(90deg,#22c55e,#16a34a)}
+.badge{display:inline-block; padding:.35rem .6rem; border-radius:8px; font-weight:600; font-size:.85rem; border:1px solid}
+.ok{color:var(--ok); background:rgba(16,185,129,.08); border-color:rgba(16,185,129,.25)}
+.warn{color:var(--warn); background:rgba(245,158,11,.08); border-color:rgba(245,158,11,.25)}
+.err{color:var(--err); background:rgba(239,68,68,.08); border-color:rgba(239,68,68,.25)}
+.lbl{font-weight:600; margin-bottom:4px}
+.lbl.missing{color:var(--err)}
+.help-err{color:var(--err); font-size:.85rem; margin-top:.25rem}
+.js-plotly-plot{border:1px solid var(--line); border-radius:12px}
+footer, #MainMenu, header{visibility:hidden}
+.footer{color:#6b7280; text-align:center; padding:1.6rem 0 1rem; border-top:1px solid #ececec; margin-top:1.2rem}
+</style>
+"""
+CSS_DARK = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+:root{
+  --bg:#0b1020; --card:#11182a; --text:#eef2ff; --muted:#a5b4fc; --line:#1f2a44;
+  --primary:#7c9cff; --ok:#34d399; --warn:#f59e0b; --err:#f87171;
+}
+*{font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont}
+[data-testid="stAppViewContainer"]{background:var(--bg)}
+.block-container{max-width:1100px; padding-top:1rem}
+.card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:1rem 1.2rem; margin-bottom:1rem}
+.h1{font-size:1.6rem; font-weight:700; color:var(--text); margin:0 0 .25rem}
+.h2{font-size:1.05rem; font-weight:700; color:var(--text); border-bottom:1px solid #243352; padding-bottom:.35rem; margin-bottom:.7rem}
+.kpi{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1rem; text-align:center}
+.kpv{font-size:1.5rem; font-weight:700; color:var(--primary)}
+.kpl{font-size:.8rem; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:700}
+.progress{height:8px; background:#1a2744; border-radius:8px; overflow:hidden; margin:.5rem 0 .7rem}
+.progress > div{height:100%; background:linear-gradient(90deg,#22c55e,#16a34a)}
+.badge{display:inline-block; padding:.35rem .6rem; border-radius:8px; font-weight:600; font-size:.85rem; border:1px solid}
+.ok{color:var(--ok); background:rgba(52,211,153,.12); border-color:rgba(52,211,153,.25)}
+.warn{color:var(--warn); background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.25)}
+.err{color:var(--err); background:rgba(248,113,113,.12); border-color:rgba(248,113,113,.25)}
+.lbl{font-weight:600; margin-bottom:4px; color:var(--text)}
+.lbl.missing{color:var(--err)}
+.help-err{color:var(--err); font-size:.85rem; margin-top:.25rem}
+.js-plotly-plot{border:1px solid var(--line); border-radius:12px; background:var(--card)}
+footer, #MainMenu, header{visibility:hidden}
+.footer{color:#9aa6ff; text-align:center; padding:1.6rem 0 1rem; border-top:1px solid #243352; margin-top:1.2rem}
+</style>
+"""
+st.markdown(CSS_DARK if tema == "Escuro" else CSS_LIGHT, unsafe_allow_html=True)
+plotly_template = "plotly_dark" if tema == "Escuro" else "plotly_white"
+
+# ===================== CABEÇALHO =====================
 st.markdown('<div class="card"><div class="h1">📊 Finhealth VaR</div>'
-            '<div style="color:#6b7280">Risco paramétrico por classe • Relatórios e respostas CVM/B3</div></div>',
+            '<div style="color:var(--muted)">Risco paramétrico por classe • Relatórios e respostas CVM/B3</div></div>',
             unsafe_allow_html=True)
 
-# ============== DADOS DO FUNDO + ALOCAÇÃO (CENTRAL) ==============
+# ===================== DADOS DO FUNDO + ALOCAÇÃO =====================
 with st.form("form_fundo"):
     st.markdown('<div class="card"><div class="h2">🏢 Dados do Fundo</div>', unsafe_allow_html=True)
 
-    # labels custom + inputs com label oculto (para permitir destacar em vermelho)
     c1, c2 = st.columns(2)
     with c1:
         label("CNPJ *", missing=(st.session_state.tentou and not st.session_state.get("cnpj_val", "").strip()))
-        cnpj = st.text_input("", placeholder="00.000.000/0001-00",
-                             label_visibility="collapsed")
+        cnpj = st.text_input("", placeholder="00.000.000/0001-00", label_visibility="collapsed")
         if st.session_state.tentou and not cnpj.strip():
             st.markdown('<div class="help-err">Informe o CNPJ.</div>', unsafe_allow_html=True)
 
         label("Nome do Fundo *", missing=(st.session_state.tentou and not st.session_state.get("nome_val", "").strip()))
-        nome_fundo = st.text_input("", placeholder="Fundo XPTO",
-                                   label_visibility="collapsed")
+        nome_fundo = st.text_input("", placeholder="Fundo XPTO", label_visibility="collapsed")
         if st.session_state.tentou and not nome_fundo.strip():
             st.markdown('<div class="help-err">Informe o nome do fundo.</div>', unsafe_allow_html=True)
 
@@ -172,33 +207,25 @@ with st.form("form_fundo"):
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="card"><div class="h2">📊 Alocação por Classe</div>', unsafe_allow_html=True)
-    st.caption("Informe a distribuição do patrimônio por classe, a volatilidade anual sugerida e, se aplicável, a sensibilidade.")
+    st.caption("Informe a distribuição por classe, a volatilidade anual sugerida e, se aplicável, a sensibilidade (elasticidade ao fator).")
 
     carteira, soma = [], 0.0
-    faltas_vol = {}  # para marcar vol faltante quando houver alocação
+    faltas_vol = {}
 
     for classe, vol_sugerida in VOL_PADRAO.items():
         a, b, c = st.columns([1.2, .9, .9])
-
         with a:
-            # rótulo + input (sem '?')
-            perc_key = f"p_{classe}"
             label(f"{classe} (%)")
             perc = st.number_input("", min_value=0.0, max_value=100.0, value=0.0, step=0.5,
-                                   key=perc_key, label_visibility="collapsed")
-
+                                   key=f"p_{classe}", label_visibility="collapsed")
         with b:
-            vol_key = f"v_{classe}"
             label("Volatilidade Anual")
             vol_a = st.number_input("", min_value=0.0, max_value=2.0, value=float(vol_sugerida),
-                                    step=0.01, format="%.2f", key=vol_key,
-                                    label_visibility="collapsed")
-
+                                    step=0.01, format="%.2f", key=f"v_{classe}", label_visibility="collapsed")
         with c:
-            sens_key = f"s_{classe}"
             label("Sensibilidade")
             sens = st.number_input("", min_value=-10.0, max_value=10.0, value=1.0, step=0.1,
-                                   key=sens_key, label_visibility="collapsed")
+                                   key=f"s_{classe}", label_visibility="collapsed")
 
         if perc > 0:
             carteira.append({"classe": classe, "%PL": perc, "vol_anual": float(vol_a), "sens": float(sens)})
@@ -208,54 +235,40 @@ with st.form("form_fundo"):
                 st.markdown(f'<div class="help-err">Volatilidade obrigatória para "{classe}".</div>', unsafe_allow_html=True)
 
     # Barra + status
-    st.markdown('<div class="progress"><div style="width:{}%"></div></div>'.format(min(soma,100.0)), unsafe_allow_html=True)
+    st.markdown(f'<div class="progress"><div style="width:{min(soma,100):.1f}%"></div></div>', unsafe_allow_html=True)
     if soma == 100:
         st.markdown('<span class="badge ok">✅ Alocação total: 100%</span>', unsafe_allow_html=True)
     elif soma > 100:
         st.markdown(f'<span class="badge err">❌ A soma ultrapassa 100% ({soma:.1f}%).</span>', unsafe_allow_html=True)
     elif soma > 0:
         st.markdown(f'<span class="badge warn">⚠️ A soma está em {soma:.1f}%. Complete até 100%.</span>', unsafe_allow_html=True)
-    else:
-        if st.session_state.tentou:
-            st.markdown('<span class="badge err">❌ Informe ao menos uma alocação.</span>', unsafe_allow_html=True)
 
     completar_caixa = st.checkbox("Completar automaticamente com Caixa quando a soma for menor que 100%", value=True)
 
-    # Botão SEM desabilitar — validação após clique
     submit = st.form_submit_button("🚀 Calcular")
-
-    # ======= Validação =======
     if submit:
         st.session_state.tentou = True
         missing_msgs = []
-
-        if not cnpj.strip():
-            missing_msgs.append("CNPJ")
-        if not nome_fundo.strip():
-            missing_msgs.append("Nome do Fundo")
-        if pl <= 0:
-            missing_msgs.append("Patrimônio Líquido maior que zero")
-        if soma == 0:
-            missing_msgs.append("Informar ao menos uma classe na alocação")
-        if soma > 100:
-            missing_msgs.append("Soma da alocação não pode exceder 100%")
-        for classe, flag in faltas_vol.items():
-            if flag:
-                missing_msgs.append(f'Volatilidade anual para "{classe}"')
+        if not cnpj.strip(): missing_msgs.append("CNPJ")
+        if not nome_fundo.strip(): missing_msgs.append("Nome do Fundo")
+        if pl <= 0: missing_msgs.append("Patrimônio Líquido maior que zero")
+        if soma == 0: missing_msgs.append("Informar ao menos uma classe na alocação")
+        if soma > 100: missing_msgs.append("Soma da alocação não pode exceder 100%")
+        for classe in faltas_vol:
+            missing_msgs.append(f'Volatilidade anual para "{classe}"')
 
         if missing_msgs:
             st.session_state.rodar = False
-            st.error("Por favor, corrija os campos destacados em vermelho:\n- " + "\n- ".join(missing_msgs))
+            st.error("Por favor, corrija os campos destacados:\n- " + "\n- ".join(missing_msgs))
         else:
             if soma < 100 and completar_caixa:
                 carteira.append({"classe": "Caixa", "%PL": 100 - soma, "vol_anual": 0.0001, "sens": 0.0})
                 soma = 100.0
             st.session_state.rodar = True
-            st.session_state.inputs = {
-                "cnpj": cnpj, "nome": nome_fundo, "data": data_ref, "pl": pl, "carteira": carteira
-            }
+            st.session_state.inputs = {"cnpj": cnpj, "nome": nome_fundo, "data": data_ref, "pl": pl, "carteira": carteira}
+            st.success("Cálculo concluído. Veja os resultados abaixo.")
 
-# ============== RESULTADOS ==============
+# ===================== RESULTADOS =====================
 if st.session_state.rodar:
     data = st.session_state.inputs
     pl = data["pl"]
@@ -282,7 +295,7 @@ if st.session_state.rodar:
     z = z_value(conf_label); h = int(horizonte_dias)
     var_pct, var_rs, sigma_port_d = var_portfolio(pl, pesos, sigma_d, h, z, corr=corr)
 
-    # VaR isolado por classe (para exibição)
+    # VaR isolado por classe (exibição)
     var_cls_pct = (z * sigma_d * np.sqrt(h)) * pesos     # fração do PL
     var_cls_rs = var_cls_pct * pl
     df_var = pd.DataFrame({
@@ -316,11 +329,12 @@ if st.session_state.rodar:
     # Gráficos
     g1, g2 = st.columns(2)
     with g1:
-        fig = px.pie(df_var, values="%PL", names="classe", title="Distribuição da Carteira")
+        fig = px.pie(df_var, values="%PL", names="classe", title="Distribuição da Carteira", template=plotly_template)
         fig.update_layout(height=360)
         st.plotly_chart(fig, use_container_width=True)
     with g2:
-        fig2 = px.bar(df_var, x="classe", y="VaR_R$", title="VaR por Classe (R$)", color="VaR_R$", color_continuous_scale="Blues")
+        fig2 = px.bar(df_var, x="classe", y="VaR_R$", title="VaR por Classe (R$)",
+                      color="VaR_R$", color_continuous_scale="Blues", template=plotly_template)
         fig2.update_layout(xaxis_title="", yaxis_title="VaR (R$)", height=360)
         fig2.update_xaxes(tickangle=45)
         st.plotly_chart(fig2, use_container_width=True)
@@ -340,15 +354,41 @@ if st.session_state.rodar:
     st.dataframe(pd.DataFrame(est_rows), use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Compliance CVM/B3
+    # ===================== COMPLIANCE CVM/B3 =====================
     st.markdown('<div class="card"><div class="h2">🏛️ Respostas CVM/B3</div>', unsafe_allow_html=True)
     z95 = 1.644854
-    var21_pct = z95 * sigma_port_d * np.sqrt(21) * 100.0
+    var21_pct = z95 * sigma_port_d * np.sqrt(21) * 100.0  # em %
     brutos = [impacto_por_fator(f, carteira, ch) for f, ch in CENARIOS_PADRAO.items()]
     pior_stress_pct = (min(brutos) * 100.0) if brutos else 0.0
 
     def imp_unit(fator, unit=-0.01):
-        return impacto_por_fator(fator, carteira, unit) * 100.0
+        return impacto_por_fator(fator, carteira, unit) * 100.0  # em %
+
+    # Principal fator (pondera exposição e sensibilidade)
+    excluidos = {"Ibovespa", "Juros-Pré", "Dólar"}
+    expos = {}
+    for it in carteira:
+        fator = FATOR_MAP.get(it["classe"])
+        if fator:
+            expos[fator] = expos.get(fator, 0.0) + (it["%PL"]/100.0)*abs(it.get("sens", 1.0))
+    principal = max(expos, key=expos.get) if expos else None
+
+    if principal in excluidos:
+        resp_outros_composta = "Não aplicável (principal fator é juros, câmbio ou bolsa)"
+        resp_outros_fator = "—"
+        resp_outros_pct = "—"
+        explicacao_outros = f"Obs.: Principal fator identificado: {principal}. Como ele já está entre juros, câmbio ou bolsa, as três últimas linhas não se aplicam."
+    else:
+        if principal:
+            var_outros_pct = imp_unit(principal, -0.01)
+            resp_outros_composta = f"{var_outros_pct:.4f}% (Fator: {principal})"
+            resp_outros_fator = principal
+            resp_outros_pct = f"{var_outros_pct:.4f}%"
+        else:
+            resp_outros_composta = "—"
+            resp_outros_fator = "—"
+            resp_outros_pct = "—"
+        explicacao_outros = "Obs.: As três últimas linhas só se aplicam quando o principal fator não é juros, câmbio nem bolsa."
 
     df_cvm = pd.DataFrame({
         "Pergunta": [
@@ -363,7 +403,11 @@ if st.session_state.rodar:
             "Qual a variação diária percentual esperada para o valor da cota do fundo no pior cenário de estresse definido pelo seu administrador?",
             "Qual a variação diária percentual esperada para o patrimônio do fundo caso ocorra uma variação negativa de 1% na taxa anual de juros (pré)?",
             "Qual a variação diária percentual esperada para o patrimônio do fundo caso ocorra uma variação negativa de 1% na taxa de câmbio (US$/Real)?",
-            "Qual a variação diária percentual esperada para o patrimônio do fundo caso ocorra uma variação negativa de 1% no preço das ações (IBOVESPA)?"
+            "Qual a variação diária percentual esperada para o patrimônio do fundo caso ocorra uma variação negativa de 1% no preço das ações (IBOVESPA)?",
+            # Novas:
+            "Qual a variação diária percentual esperada para o patrimônio do fundo caso ocorra uma variação negativa de 1% no principal fator de risco que o fundo está exposto, caso não seja nenhum dos 3 citados anteriormente (juros, câmbio, bolsa)? Considerar o último dia útil do mês de referência. Informar também qual foi o fator de risco considerado.",
+            "Indicar o fator de risco",
+            "Variação diária percentual esperada"
         ],
         "Resposta": [
             f"{var21_pct:.4f}%",
@@ -377,10 +421,14 @@ if st.session_state.rodar:
             f"{pior_stress_pct:.4f}%",
             f"{imp_unit('Juros-Pré', -0.01):.4f}%",
             f"{imp_unit('Dólar', -0.01):.4f}%",
-            f"{imp_unit('Ibovespa', -0.01):.4f}%"
+            f"{imp_unit('Ibovespa', -0.01):.4f}%",
+            resp_outros_composta,
+            resp_outros_fator,
+            resp_outros_pct
         ]
     })
     st.dataframe(df_cvm, use_container_width=True)
+    st.caption(explicacao_outros)
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Downloads
@@ -434,5 +482,6 @@ if st.session_state.rodar:
             except Exception as e:
                 st.error(f"Erro ao processar template: {e}")
 
-# ============== RODAPÉ ==============
+# ===================== RODAPÉ =====================
 st.markdown('<div class="footer">Feito com ❤️ <b>Finhealth</b></div>', unsafe_allow_html=True)
+
