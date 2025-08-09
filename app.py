@@ -27,7 +27,6 @@ DESC_CENARIO = {
     "Dólar": "Queda de 5% no dólar",
     "Outros": "Queda de 3% em outros ativos"
 }
-# Mapeia classe -> fator para estresse
 FATOR_MAP = {
     "Ações (Ibovespa)": "Ibovespa",
     "Juros-Pré": "Juros-Pré",
@@ -71,54 +70,33 @@ def impacto_por_fator(fator, carteira_rows, choque):
             impacto += choque * it.get("sens", 1.0) * (it["%PL"]/100.0)
     return impacto  # fração do PL
 
-def label(texto: str, missing: bool=False):
-    st.markdown(f'<div class="lbl{" missing" if missing else ""}">{texto}</div>', unsafe_allow_html=True)
+def label(texto: str):
+    st.markdown(f'<div class="lbl">{texto}</div>', unsafe_allow_html=True)
 
 # ===================== ESTADO =====================
 if "rodar" not in st.session_state: st.session_state.rodar = False
 if "corr_df" not in st.session_state: st.session_state.corr_df = None
 if "tentou" not in st.session_state: st.session_state.tentou = False
+if "tema" not in st.session_state: st.session_state.tema = "Escuro"  # padrão: escuro
 
-# ===================== SIDEBAR (Parâmetros + Tema) =====================
-with st.sidebar:
-    st.header("⚙️ Parâmetros")
-
-    tema = st.selectbox(
-        "Tema",
-        ["Claro", "Escuro"],
-        index=0,
-        help="Altera a aparência do site."
-    )
-
-    horizonte_dias = st.selectbox(
-        "Horizonte (dias úteis)",
-        [1, 10, 21], index=2,
-        help="Período considerado para o cálculo do VaR."
-    )
-    conf_label = st.selectbox(
-        "Confiança",
-        ["95%", "99%"], index=0,
-        help="Probabilidade associada ao nível de perda estimada."
-    )
-    metodologia = st.selectbox(
-        "Metodologia",
-        ["Sem correlação (soma em quadratura)", "Com correlação (matriz de correlação)"],
-        index=0,
-        help="Define se o portfólio considera dependência entre classes de ativos."
-    )
-    usar_corr = metodologia.startswith("Com correlação")
+# ===================== TOGGLE DE TEMA (CANTO SUPERIOR DIREITO) =====================
+top_l, top_r = st.columns([1, 0.16])
+with top_r:
+    dark_mode = st.toggle("Tema escuro", value=(st.session_state.tema == "Escuro"),
+                          help="Alterna entre tema claro e escuro")
+    st.session_state.tema = "Escuro" if dark_mode else "Claro"
 
 # ===================== TEMA (CSS dinâmico) =====================
 CSS_LIGHT = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 :root{
-  --bg:#fafbfc; --card:#ffffff; --text:#111827; --muted:#6b7280; --line:#e5e7eb;
+  --bg:#f6f7fb; --card:#ffffff; --text:#111827; --muted:#6b7280; --line:#e5e7eb;
   --primary:#075aff; --ok:#10b981; --warn:#f59e0b; --err:#ef4444;
 }
 *{font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont}
 [data-testid="stAppViewContainer"]{background:var(--bg)}
-.block-container{max-width:1100px; padding-top:1rem}
+.block-container{max-width:1100px; padding-top:.25rem}
 .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:1rem 1.2rem; margin-bottom:1rem}
 .h1{font-size:1.6rem; font-weight:700; margin:0 0 .25rem}
 .h2{font-size:1.05rem; font-weight:700; color:var(--text); border-bottom:1px solid #f2f3f5; padding-bottom:.35rem; margin-bottom:.7rem}
@@ -132,7 +110,6 @@ CSS_LIGHT = """
 .warn{color:var(--warn); background:rgba(245,158,11,.08); border-color:rgba(245,158,11,.25)}
 .err{color:var(--err); background:rgba(239,68,68,.08); border-color:rgba(239,68,68,.25)}
 .lbl{font-weight:600; margin-bottom:4px}
-.lbl.missing{color:var(--err)}
 .help-err{color:var(--err); font-size:.85rem; margin-top:.25rem}
 .js-plotly-plot{border:1px solid var(--line); border-radius:12px}
 footer, #MainMenu, header{visibility:hidden}
@@ -143,34 +120,46 @@ CSS_DARK = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 :root{
-  --bg:#0b1020; --card:#11182a; --text:#eef2ff; --muted:#a5b4fc; --line:#1f2a44;
-  --primary:#7c9cff; --ok:#34d399; --warn:#f59e0b; --err:#f87171;
+  --bg:#0e1117; --card:#111827; --text:#e5e7eb; --muted:#94a3b8; --line:#1f2937;
+  --primary:#10a37f; --ok:#22c55e; --warn:#f59e0b; --err:#f87171;
 }
 *{font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont}
 [data-testid="stAppViewContainer"]{background:var(--bg)}
-.block-container{max-width:1100px; padding-top:1rem}
+.block-container{max-width:1100px; padding-top:.25rem}
 .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:1rem 1.2rem; margin-bottom:1rem}
 .h1{font-size:1.6rem; font-weight:700; color:var(--text); margin:0 0 .25rem}
-.h2{font-size:1.05rem; font-weight:700; color:var(--text); border-bottom:1px solid #243352; padding-bottom:.35rem; margin-bottom:.7rem}
+.h2{font-size:1.05rem; font-weight:700; color:var(--text); border-bottom:1px solid #223047; padding-bottom:.35rem; margin-bottom:.7rem}
 .kpi{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1rem; text-align:center}
 .kpv{font-size:1.5rem; font-weight:700; color:var(--primary)}
 .kpl{font-size:.8rem; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:700}
-.progress{height:8px; background:#1a2744; border-radius:8px; overflow:hidden; margin:.5rem 0 .7rem}
+.progress{height:8px; background:#1a2234; border-radius:8px; overflow:hidden; margin:.5rem 0 .7rem}
 .progress > div{height:100%; background:linear-gradient(90deg,#22c55e,#16a34a)}
 .badge{display:inline-block; padding:.35rem .6rem; border-radius:8px; font-weight:600; font-size:.85rem; border:1px solid}
-.ok{color:var(--ok); background:rgba(52,211,153,.12); border-color:rgba(52,211,153,.25)}
+.ok{color:var(--ok); background:rgba(34,197,94,.12); border-color:rgba(34,197,94,.25)}
 .warn{color:var(--warn); background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.25)}
 .err{color:var(--err); background:rgba(248,113,113,.12); border-color:rgba(248,113,113,.25)}
 .lbl{font-weight:600; margin-bottom:4px; color:var(--text)}
-.lbl.missing{color:var(--err)}
 .help-err{color:var(--err); font-size:.85rem; margin-top:.25rem}
 .js-plotly-plot{border:1px solid var(--line); border-radius:12px; background:var(--card)}
 footer, #MainMenu, header{visibility:hidden}
-.footer{color:#9aa6ff; text-align:center; padding:1.6rem 0 1rem; border-top:1px solid #243352; margin-top:1.2rem}
+.footer{color:#9aa6ff; text-align:center; padding:1.6rem 0 1rem; border-top:1px solid #223047; margin-top:1.2rem}
 </style>
 """
-st.markdown(CSS_DARK if tema == "Escuro" else CSS_LIGHT, unsafe_allow_html=True)
-plotly_template = "plotly_dark" if tema == "Escuro" else "plotly_white"
+st.markdown(CSS_DARK if st.session_state.tema == "Escuro" else CSS_LIGHT, unsafe_allow_html=True)
+plotly_template = "plotly_dark" if st.session_state.tema == "Escuro" else "plotly_white"
+
+# ===================== SIDEBAR (apenas Parâmetros) =====================
+with st.sidebar:
+    st.header("⚙️ Parâmetros")
+    horizonte_dias = st.selectbox("Horizonte (dias úteis)", [1, 10, 21], index=2,
+                                  help="Período considerado para o cálculo do VaR.")
+    conf_label = st.selectbox("Confiança", ["95%", "99%"], index=0,
+                              help="Probabilidade associada ao nível de perda estimada.")
+    metodologia = st.selectbox("Metodologia",
+                               ["Sem correlação (soma em quadratura)", "Com correlação (matriz de correlação)"],
+                               index=0,
+                               help="Define se o portfólio considera dependência entre classes de ativos.")
+    usar_corr = metodologia.startswith("Com correlação")
 
 # ===================== CABEÇALHO =====================
 st.markdown('<div class="card"><div class="h1">📊 Finhealth VaR</div>'
@@ -183,12 +172,12 @@ with st.form("form_fundo"):
 
     c1, c2 = st.columns(2)
     with c1:
-        label("CNPJ *", missing=(st.session_state.tentou and not st.session_state.get("cnpj_val", "").strip()))
+        label("CNPJ *")
         cnpj = st.text_input("", placeholder="00.000.000/0001-00", label_visibility="collapsed")
         if st.session_state.tentou and not cnpj.strip():
             st.markdown('<div class="help-err">Informe o CNPJ.</div>', unsafe_allow_html=True)
 
-        label("Nome do Fundo *", missing=(st.session_state.tentou and not st.session_state.get("nome_val", "").strip()))
+        label("Nome do Fundo *")
         nome_fundo = st.text_input("", placeholder="Fundo XPTO", label_visibility="collapsed")
         if st.session_state.tentou and not nome_fundo.strip():
             st.markdown('<div class="help-err">Informe o nome do fundo.</div>', unsafe_allow_html=True)
@@ -197,8 +186,7 @@ with st.form("form_fundo"):
         label("Data de Referência *")
         data_ref = st.date_input("", value=datetime.date.today(), label_visibility="collapsed")
 
-        pl_missing = st.session_state.tentou and (st.session_state.get("pl_val", 0.0) <= 0)
-        label("Patrimônio Líquido (R$) *", missing=pl_missing)
+        label("Patrimônio Líquido (R$) *")
         pl = st.number_input("", min_value=0.0, value=1_000_000.0, step=1_000.0, format="%.2f",
                              label_visibility="collapsed")
         if st.session_state.tentou and pl <= 0:
@@ -404,7 +392,6 @@ if st.session_state.rodar:
             "Qual a variação diária percentual esperada para o patrimônio do fundo caso ocorra uma variação negativa de 1% na taxa anual de juros (pré)?",
             "Qual a variação diária percentual esperada para o patrimônio do fundo caso ocorra uma variação negativa de 1% na taxa de câmbio (US$/Real)?",
             "Qual a variação diária percentual esperada para o patrimônio do fundo caso ocorra uma variação negativa de 1% no preço das ações (IBOVESPA)?",
-            # Novas:
             "Qual a variação diária percentual esperada para o patrimônio do fundo caso ocorra uma variação negativa de 1% no principal fator de risco que o fundo está exposto, caso não seja nenhum dos 3 citados anteriormente (juros, câmbio, bolsa)? Considerar o último dia útil do mês de referência. Informar também qual foi o fator de risco considerado.",
             "Indicar o fator de risco",
             "Variação diária percentual esperada"
@@ -484,4 +471,3 @@ if st.session_state.rodar:
 
 # ===================== RODAPÉ =====================
 st.markdown('<div class="footer">Feito com ❤️ <b>Finhealth</b></div>', unsafe_allow_html=True)
-
