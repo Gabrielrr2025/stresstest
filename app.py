@@ -45,23 +45,12 @@ def brl(x: float, casas: int = 0) -> str:
     s = f"{x:,.{casas}f}"
     return "R$ " + s.replace(",", "X").replace(".", ",").replace("X", ".")
 
-def var_portfolio(pl, pesos, sigma_d, h, z, corr=None):
+def var_portfolio(pl, pesos, sigma_d, h, z):
     w = np.array(pesos, dtype=float)
     s = np.array(sigma_d, dtype=float)
-    if corr is None:
-        sigma_port_d = np.sqrt(np.sum((w * s) ** 2))
-    else:
-        D = np.diag(s); Sigma = D @ corr @ D
-        sigma2 = float(w @ Sigma @ w)
-        sigma_port_d = np.sqrt(max(sigma2, 0.0))
+    sigma_port_d = np.sqrt(np.sum((w * s) ** 2))  # ρ = 0 (sem correlação)
     var_total_pct = z * sigma_port_d * np.sqrt(h)
     return var_total_pct, var_total_pct * pl, sigma_port_d
-
-def montar_correlacao(classes):
-    n = len(classes)
-    base = np.full((n, n), 0.20, dtype=float)
-    np.fill_diagonal(base, 1.0)
-    return pd.DataFrame(base, index=classes, columns=classes)
 
 def impacto_por_fator(fator, carteira_rows, choque):
     impacto = 0.0
@@ -72,7 +61,6 @@ def impacto_por_fator(fator, carteira_rows, choque):
 
 # ===================== ESTADO =====================
 if "rodar" not in st.session_state: st.session_state.rodar = False
-if "corr_df" not in st.session_state: st.session_state.corr_df = None
 if "tentou" not in st.session_state: st.session_state.tentou = False
 
 # ===================== SIDEBAR (Parâmetros formais) =====================
@@ -91,16 +79,12 @@ with st.sidebar:
             "A política de risco do fundo deve definir o nível adotado."
         )
     )
-    metodologia = st.selectbox(
+    metodologia = st.selectbox(  # mantido por clareza, mas só um método
         "Metodologia",
-        [
-            "VaR Paramétrico (Delta-Normal, ρ=0)",
-            "VaR Paramétrico (Delta-Normal, com correlação)"
-        ],
+        ["VaR Paramétrico"],
         index=0,
-        help="Modelo paramétrico variância-covariância. A versão com correlação utiliza matriz Corr para agregação."
+        help="Modelo paramétrico (Delta-Normal) sem correlação entre classes na agregação do risco."
     )
-    usar_corr = metodologia.endswith("com correlação")
 
 # ===================== CABEÇALHO =====================
 st.title("📊 Finhealth VaR")
@@ -129,9 +113,7 @@ with st.form("form_fundo"):
             st.markdown("<div style='color:#d00000'>Informe um valor maior que zero.</div>", unsafe_allow_html=True)
 
     st.subheader("📊 Alocação por Classe")
-    st.caption(
-        "Informe a distribuição por classe, a volatilidade anual sugerida e, se aplicável, a sensibilidade."
-    )
+    st.caption("Informe a distribuição por classe, a volatilidade anual sugerida e, se aplicável, a sensibilidade.")
     with st.expander("ℹ️ O que é Sensibilidade (β)?", expanded=False):
         st.write(
             "- **Definição:** elasticidade do valor da classe ao seu fator de risco. "
@@ -210,27 +192,9 @@ if st.session_state.rodar:
     sigma_d = np.array([it["vol_anual"]/np.sqrt(252) for it in carteira], dtype=float)
     classes = [it["classe"] for it in carteira]
 
-    # Correlação (opcional)
-    corr = None
-    if "com correlação" in st.session_state.get("metodologia_texto", "").lower():
-        usar_corr = True
-    # mas preferimos a flag da sidebar:
-    # (mantida da seleção anterior)
-    if 'usar_corr' in globals():
-        pass
-    if usar_corr:
-        if (st.session_state.corr_df is None) or (list(st.session_state.corr_df.index) != classes):
-            st.session_state.corr_df = montar_correlacao(classes)
-        with st.expander("🔗 Matriz de correlação (opcional)"):
-            st.caption("A matriz deve ser simétrica e ter 1 na diagonal. Ajuste se necessário.")
-            edit = st.data_editor(st.session_state.corr_df.round(2), num_rows="fixed", use_container_width=True)
-            M = edit.to_numpy(float); M = (M + M.T)/2.0; np.fill_diagonal(M, 1.0)
-            st.session_state.corr_df = pd.DataFrame(M, index=classes, columns=classes)
-        corr = st.session_state.corr_df.to_numpy(float)
-
-    # Cálculo VaR portfólio
+    # Cálculo VaR portfólio (sem correlação)
     h = int(horizonte_dias); z = z_value(conf_label)
-    var_pct, var_rs, sigma_port_d = var_portfolio(pl, pesos, sigma_d, h, z, corr=corr)
+    var_pct, var_rs, sigma_port_d = var_portfolio(pl, pesos, sigma_d, h, z)
 
     # VaR isolado por classe (exibição)
     var_cls_pct = (z * sigma_d * np.sqrt(h)) * pesos     # fração do PL
@@ -342,7 +306,7 @@ if st.session_state.rodar:
         ],
         "Resposta": [
             f"{var21_pct:.4f}%",
-            "VaR Paramétrico (Delta-Normal)" + (" — com correlação" if usar_corr else " — ρ=0, sem correlação"),
+            "VaR Paramétrico",
             DESC_CENARIO["Ibovespa"],
             DESC_CENARIO["Juros-Pré"],
             DESC_CENARIO["Cupom Cambial"],
@@ -370,10 +334,8 @@ if st.session_state.rodar:
             pd.DataFrame({
                 "Campo":["CNPJ","Fundo","Data","PL (R$)","Confiança","Horizonte","Método"],
                 "Valor":[data["cnpj"], data["nome"], data["data"].strftime("%d/%m/%Y"), brl(pl,2),
-                         conf_label, f"{h} dias",
-                         "VaR Paramétrico (Delta-Normal, com correlação)" if usar_corr else "VaR Paramétrico (Delta-Normal, ρ=0)"]
+                         conf_label, f"{h} dias", "VaR Paramétrico"]
             }).to_excel(w, sheet_name="Metadados", index=False)
-            # Exporta dados “crus” também:
             pd.DataFrame(carteira).to_excel(w, sheet_name="Carteira_Input", index=False)
             df_var.to_excel(w, sheet_name="VaR_por_Classe_raw", index=False)
             pd.DataFrame(est_rows).to_excel(w, sheet_name="Cenarios_Estresse", index=False)
