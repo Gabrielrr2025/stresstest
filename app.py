@@ -70,45 +70,10 @@ def impacto_por_fator(fator, carteira_rows, choque):
             impacto += choque * it.get("sens", 1.0) * (it["%PL"]/100.0)
     return impacto  # fração do PL
 
-def label(texto: str):
-    st.markdown(f'<div class="lbl">{texto}</div>', unsafe_allow_html=True)
-
 # ===================== ESTADO =====================
 if "rodar" not in st.session_state: st.session_state.rodar = False
 if "corr_df" not in st.session_state: st.session_state.corr_df = None
 if "tentou" not in st.session_state: st.session_state.tentou = False
-
-# ===================== TEMA DARK (estilo ChatGPT) =====================
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-:root{
-  --bg:#0e1117; --card:#111827; --text:#e5e7eb; --muted:#94a3b8; --line:#1f2937;
-  --primary:#10a37f; --ok:#22c55e; --warn:#f59e0b; --err:#f87171;
-}
-*{font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont}
-[data-testid="stAppViewContainer"]{background:var(--bg)}
-.block-container{max-width:1100px; padding-top:.25rem}
-.card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:1rem 1.2rem; margin-bottom:1rem}
-.h1{font-size:1.6rem; font-weight:700; color:var(--text); margin:0 0 .25rem}
-.h2{font-size:1.05rem; font-weight:700; color:var(--text); border-bottom:1px solid #223047; padding-bottom:.35rem; margin-bottom:.7rem}
-.kpi{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1rem; text-align:center}
-.kpv{font-size:1.5rem; font-weight:700; color:var(--primary)}
-.kpl{font-size:.8rem; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:700}
-.progress{height:8px; background:#1a2234; border-radius:8px; overflow:hidden; margin:.5rem 0 .7rem}
-.progress > div{height:100%; background:linear-gradient(90deg,#22c55e,#16a34a)}
-.badge{display:inline-block; padding:.35rem .6rem; border-radius:8px; font-weight:600; font-size:.85rem; border:1px solid}
-.ok{color:var(--ok); background:rgba(34,197,94,.12); border-color:rgba(34,197,94,.25)}
-.warn{color:var(--warn); background:rgba(245,158,11,.12); border-color:rgba(245,158,11,.25)}
-.err{color:var(--err); background:rgba(248,113,113,.12); border-color:rgba(248,113,113,.25)}
-.lbl{font-weight:600; margin-bottom:4px; color:var(--text)}
-.help-err{color:var(--err); font-size:.85rem; margin-top:.25rem}
-.js-plotly-plot{border:1px solid var(--line); border-radius:12px; background:var(--card)}
-footer, #MainMenu, header{visibility:hidden}
-.footer{color:#9aa6ff; text-align:center; padding:1.6rem 0 1rem; border-top:1px solid #223047; margin-top:1.2rem}
-</style>
-""", unsafe_allow_html=True)
-plotly_template = "plotly_dark"
 
 # ===================== SIDEBAR (Parâmetros formais) =====================
 with st.sidebar:
@@ -121,9 +86,9 @@ with st.sidebar:
         ["95%", "99%"], index=0,
         help=(
             "Nível de confiança do VaR (quantil da distribuição de perdas).\n"
-            "• 95% (z≈1,645): aceita 5% de chance de exceder o VaR. Mais estável e menos conservador.\n"
-            "• 99% (z≈2,326): aceita 1% de chance de exceder o VaR. Mais conservador, porém mais sensível a outliers.\n"
-            "Escolha conforme a política de risco (ex.: CVM/B3 geralmente referencia 95% em 21 dias para reporte)."
+            "• 95% (z≈1,645): aceita 5% de chance de exceder o VaR. Normalmente usado em relatórios e limites operacionais.\n"
+            "• 99% (z≈2,326): aceita 1% de chance de exceder o VaR. Mais conservador; útil para estresse regulatório.\n"
+            "A política de risco do fundo deve definir o nível adotado."
         )
     )
     metodologia = st.selectbox(
@@ -133,52 +98,45 @@ with st.sidebar:
             "VaR Paramétrico (Delta-Normal, com correlação)"
         ],
         index=0,
-        help="Modelo paramétrico de variância-covariância. Com correlação utiliza matriz Corr para a agregação do risco."
+        help="Modelo paramétrico variância-covariância. A versão com correlação utiliza matriz Corr para agregação."
     )
     usar_corr = metodologia.endswith("com correlação")
 
 # ===================== CABEÇALHO =====================
-st.markdown('<div class="card"><div class="h1">📊 Finhealth VaR</div>'
-            '<div style="color:var(--muted)">Risco paramétrico por classe • Relatórios e respostas CVM/B3</div></div>',
-            unsafe_allow_html=True)
+st.title("📊 Finhealth VaR")
+st.caption("Risco paramétrico por classe • Relatórios e respostas CVM/B3")
 
 # ===================== DADOS DO FUNDO + ALOCAÇÃO =====================
 with st.form("form_fundo"):
-    st.markdown('<div class="card"><div class="h2">🏢 Dados do Fundo</div>', unsafe_allow_html=True)
+    st.subheader("🏢 Dados do Fundo")
 
     c1, c2 = st.columns(2)
     with c1:
-        label("CNPJ *")
-        cnpj = st.text_input("", placeholder="00.000.000/0001-00", label_visibility="collapsed")
+        cnpj = st.text_input("CNPJ *", placeholder="00.000.000/0001-00")
         if st.session_state.tentou and not cnpj.strip():
-            st.markdown('<div class="help-err">Informe o CNPJ.</div>', unsafe_allow_html=True)
+            st.markdown("<div style='color:#d00000'>Informe o CNPJ.</div>", unsafe_allow_html=True)
 
-        label("Nome do Fundo *")
-        nome_fundo = st.text_input("", placeholder="Fundo XPTO", label_visibility="collapsed")
+        nome_fundo = st.text_input("Nome do Fundo *", placeholder="Fundo XPTO")
         if st.session_state.tentou and not nome_fundo.strip():
-            st.markdown('<div class="help-err">Informe o nome do fundo.</div>', unsafe_allow_html=True)
+            st.markdown("<div style='color:#d00000'>Informe o nome do fundo.</div>", unsafe_allow_html=True)
 
     with c2:
-        label("Data de Referência *")
-        data_ref = st.date_input("", value=datetime.date.today(), label_visibility="collapsed")
+        data_ref = st.date_input("Data de Referência *", value=datetime.date.today())
 
-        label("Patrimônio Líquido (R$) *")
-        pl = st.number_input("", min_value=0.0, value=1_000_000.0, step=1_000.0, format="%.2f",
-                             label_visibility="collapsed")
+        pl = st.number_input("Patrimônio Líquido (R$) *", min_value=0.0, value=1_000_000.0,
+                             step=1_000.0, format="%.2f")
         if st.session_state.tentou and pl <= 0:
-            st.markdown('<div class="help-err">Informe um valor maior que zero.</div>', unsafe_allow_html=True)
+            st.markdown("<div style='color:#d00000'>Informe um valor maior que zero.</div>", unsafe_allow_html=True)
 
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="card"><div class="h2">📊 Alocação por Classe</div>', unsafe_allow_html=True)
+    st.subheader("📊 Alocação por Classe")
     st.caption(
         "Informe a distribuição por classe, a volatilidade anual sugerida e, se aplicável, a sensibilidade."
     )
     with st.expander("ℹ️ O que é Sensibilidade (β)?", expanded=False):
         st.write(
             "- **Definição:** elasticidade do valor da classe ao seu fator de risco. "
-            "Um β=1,0 significa que um choque de **-1%** no fator gera **-1%** na parcela do PL dessa classe.\n"
-            "- **Exemplos:** β=0,5 → metade do efeito; β=-1,0 → efeito inverso; em juros pode ser interpretado como **DV01** normalizado.\n"
+            "β=1,0 ⇒ choque de **-1%** no fator gera **-1%** na parcela do PL dessa classe.\n"
+            "- **Exemplos:** β=0,5 (metade do efeito); β=-1,0 (efeito inverso). Em juros, β pode refletir **DV01** normalizado.\n"
             "- **Uso no estresse:** impacto = choque × β × (% da classe no PL)."
         )
 
@@ -188,55 +146,55 @@ with st.form("form_fundo"):
     for classe, vol_sugerida in VOL_PADRAO.items():
         a, b, c = st.columns([1.2, .9, .9])
         with a:
-            label(f"{classe} (%)")
-            perc = st.number_input("", min_value=0.0, max_value=100.0, value=0.0, step=0.5,
-                                   key=f"p_{classe}", label_visibility="collapsed")
+            perc = st.number_input(f"{classe} (%)", min_value=0.0, max_value=100.0,
+                                   value=0.0, step=0.5, key=f"p_{classe}")
         with b:
-            label("Volatilidade Anual")
-            vol_a = st.number_input("", min_value=0.0, max_value=2.0, value=float(vol_sugerida),
-                                    step=0.01, format="%.2f", key=f"v_{classe}", label_visibility="collapsed")
+            vol_a = st.number_input("Volatilidade Anual", min_value=0.0, max_value=2.0,
+                                    value=float(vol_sugerida), step=0.01, format="%.2f", key=f"v_{classe}")
         with c:
-            label("Sensibilidade (β)")
-            sens = st.number_input("", min_value=-10.0, max_value=10.0, value=1.0, step=0.1,
-                                   key=f"s_{classe}", label_visibility="collapsed")
+            sens = st.number_input("Sensibilidade (β)", min_value=-10.0, max_value=10.0,
+                                   value=1.0, step=0.1, key=f"s_{classe}")
 
         if perc > 0:
             carteira.append({"classe": classe, "%PL": perc, "vol_anual": float(vol_a), "sens": float(sens)})
             soma += perc
             if st.session_state.tentou and vol_a <= 0:
                 faltas_vol[classe] = True
-                st.markdown(f'<div class="help-err">Volatilidade obrigatória para "{classe}".</div>', unsafe_allow_html=True)
+                st.markdown(f"<div style='color:#d00000'>Volatilidade obrigatória para \"{classe}\".</div>", unsafe_allow_html=True)
 
-    # Barra + status
-    st.markdown(f'<div class="progress"><div style="width:{min(soma,100):.1f}%"></div></div>', unsafe_allow_html=True)
+    # Barra + status (padrão Streamlit)
+    st.progress(min(int(soma), 100) / 100)
     if soma == 100:
-        st.markdown('<span class="badge ok">✅ Alocação total: 100%</span>', unsafe_allow_html=True)
+        st.success("✅ Alocação total: 100%")
     elif soma > 100:
-        st.markdown(f'<span class="badge err">❌ A soma ultrapassa 100% ({soma:.1f}%).</span>', unsafe_allow_html=True)
+        st.error(f"❌ A soma ultrapassa 100% ({soma:.1f}%).")
     elif soma > 0:
-        st.markdown(f'<span class="badge warn">⚠️ A soma está em {soma:.1f}%. Complete até 100%.</span>', unsafe_allow_html=True)
+        st.warning(f"⚠️ A soma está em {soma:.1f}%. Complete até 100%.")
+    else:
+        if st.session_state.tentou:
+            st.error("❌ Informe ao menos uma alocação.")
 
     completar_caixa = st.checkbox("Completar automaticamente com Caixa quando a soma for menor que 100%", value=True)
 
     submit = st.form_submit_button("🚀 Calcular")
     if submit:
         st.session_state.tentou = True
-        missing_msgs = []
-        if not cnpj.strip(): missing_msgs.append("CNPJ")
-        if not nome_fundo.strip(): missing_msgs.append("Nome do Fundo")
-        if pl <= 0: missing_msgs.append("Patrimônio Líquido maior que zero")
-        if soma == 0: missing_msgs.append("Informar ao menos uma classe na alocação")
-        if soma > 100: missing_msgs.append("Soma da alocação não pode exceder 100%")
-        for classe in faltas_vol:
-            missing_msgs.append(f'Volatilidade anual para "{classe}"')
+        missing = []
 
-        if missing_msgs:
+        if not cnpj.strip(): missing.append("CNPJ")
+        if not nome_fundo.strip(): missing.append("Nome do Fundo")
+        if pl <= 0: missing.append("Patrimônio Líquido maior que zero")
+        if soma == 0: missing.append("Informar ao menos uma classe na alocação")
+        if soma > 100: missing.append("Soma da alocação não pode exceder 100%")
+        for classe in faltas_vol:
+            missing.append(f'Volatilidade anual para "{classe}"')
+
+        if missing:
             st.session_state.rodar = False
-            st.error("Por favor, corrija os campos destacados:\n- " + "\n- ".join(missing_msgs))
+            st.error("Por favor, corrija:\n- " + "\n- ".join(missing))
         else:
             if soma < 100 and completar_caixa:
                 carteira.append({"classe": "Caixa", "%PL": 100 - soma, "vol_anual": 0.0001, "sens": 0.0})
-                soma = 100.0
             st.session_state.rodar = True
             st.session_state.inputs = {"cnpj": cnpj, "nome": nome_fundo, "data": data_ref, "pl": pl, "carteira": carteira}
             st.success("Cálculo concluído. Veja os resultados abaixo.")
@@ -254,6 +212,12 @@ if st.session_state.rodar:
 
     # Correlação (opcional)
     corr = None
+    if "com correlação" in st.session_state.get("metodologia_texto", "").lower():
+        usar_corr = True
+    # mas preferimos a flag da sidebar:
+    # (mantida da seleção anterior)
+    if 'usar_corr' in globals():
+        pass
     if usar_corr:
         if (st.session_state.corr_df is None) or (list(st.session_state.corr_df.index) != classes):
             st.session_state.corr_df = montar_correlacao(classes)
@@ -265,55 +229,51 @@ if st.session_state.rodar:
         corr = st.session_state.corr_df.to_numpy(float)
 
     # Cálculo VaR portfólio
-    z = z_value(conf_label); h = int(horizonte_dias)
+    h = int(horizonte_dias); z = z_value(conf_label)
     var_pct, var_rs, sigma_port_d = var_portfolio(pl, pesos, sigma_d, h, z, corr=corr)
 
     # VaR isolado por classe (exibição)
     var_cls_pct = (z * sigma_d * np.sqrt(h)) * pesos     # fração do PL
     var_cls_rs = var_cls_pct * pl
     df_var = pd.DataFrame({
-        "classe": classes,
-        "%PL": [it["%PL"] for it in carteira],
-        "vol_anual": [it["vol_anual"] for it in carteira],
-        "VaR_%": var_cls_pct * 100,
-        "VaR_R$": var_cls_rs
+        "Classe de Ativo": classes,
+        "Alocação (%)": [it["%PL"] for it in carteira],
+        "Volatilidade Anual": [it["vol_anual"] for it in carteira],
+        "VaR (%)": var_cls_pct * 100,
+        "VaR (R$)": var_cls_rs
     })
+    df_show = df_var.copy()
+    df_show["Alocação (%)"] = df_show["Alocação (%)"].map(lambda x: f"{x:.1f}%")
+    df_show["Volatilidade Anual"] = df_show["Volatilidade Anual"].map(lambda x: f"{x:.2%}")
+    df_show["VaR (%)"] = df_show["VaR (%)"].map(lambda x: f"{x:.2f}%")
+    df_show["VaR (R$)"] = df_show["VaR (R$)"].map(lambda x: brl(x, 0))
 
     # KPIs
-    st.markdown('<div class="card"><div class="h2">📌 Indicadores</div>', unsafe_allow_html=True)
-    cols = st.columns(4)
-    cols[0].markdown(f'<div class="kpi"><div class="kpv">{var_pct*100:.2f}%</div><div class="kpl">VaR ({conf_label} / {h}d)</div></div>', unsafe_allow_html=True)
-    cols[1].markdown(f'<div class="kpi"><div class="kpv">{brl(var_rs,0)}</div><div class="kpl">VaR em Reais</div></div>', unsafe_allow_html=True)
-    cols[2].markdown(f'<div class="kpi"><div class="kpv">{sigma_port_d*100:.2f}%</div><div class="kpl">σ diário da cota</div></div>', unsafe_allow_html=True)
-    cols[3].markdown(f'<div class="kpi"><div class="kpv">{sum([it["%PL"] for it in carteira]):.1f}%</div><div class="kpl">Alocação total</div></div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.subheader("📌 Indicadores")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("VaR do Portfólio", f"{var_pct*100:.2f}%", f"{h} dias • {conf_label}")
+    k2.metric("VaR em Reais", brl(var_rs, 0))
+    k3.metric("σ diário da cota", f"{sigma_port_d*100:.2f}%")
+    k4.metric("Alocação total", f"{sum([it['%PL'] for it in carteira]):.1f}%")
 
-    # Tabela
-    st.markdown('<div class="card"><div class="h2">📈 VaR por Classe (isolado)</div>', unsafe_allow_html=True)
-    df_show = df_var.copy()
-    df_show["%PL"] = df_show["%PL"].map(lambda x: f"{x:.1f}%")
-    df_show["vol_anual"] = df_show["vol_anual"].map(lambda x: f"{x:.2%}")
-    df_show["VaR_%"] = df_show["VaR_%"].map(lambda x: f"{x:.2f}%")
-    df_show["VaR (R$)"] = df_var["VaR_R$"].map(lambda x: brl(x, 0))
-    df_show = df_show.drop(columns=["VaR_R$"]).rename(columns={"classe":"Classe de Ativo","vol_anual":"Volatilidade Anual"})
+    st.subheader("📈 VaR por Classe (isolado)")
     st.dataframe(df_show, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
-    # Gráficos
+    # Gráficos (tema padrão)
     g1, g2 = st.columns(2)
     with g1:
-        fig = px.pie(df_var, values="%PL", names="classe", title="Distribuição da Carteira", template=plotly_template)
+        fig = px.pie(df_var, values="Alocação (%)", names="Classe de Ativo", title="Distribuição da Carteira", template="plotly_white")
         fig.update_layout(height=360)
         st.plotly_chart(fig, use_container_width=True)
     with g2:
-        fig2 = px.bar(df_var, x="classe", y="VaR_R$", title="VaR por Classe (R$)",
-                      color="VaR_R$", color_continuous_scale="Blues", template=plotly_template)
+        fig2 = px.bar(df_var, x="Classe de Ativo", y="VaR (R$)", title="VaR por Classe (R$)",
+                      color="VaR (R$)", color_continuous_scale="Blues", template="plotly_white")
         fig2.update_layout(xaxis_title="", yaxis_title="VaR (R$)", height=360)
         fig2.update_xaxes(tickangle=45)
         st.plotly_chart(fig2, use_container_width=True)
 
     # Estresse
-    st.markdown('<div class="card"><div class="h2">⚠️ Cenários de Estresse</div>', unsafe_allow_html=True)
+    st.subheader("⚠️ Cenários de Estresse")
     est_rows = []
     for fator, choque in CENARIOS_PADRAO.items():
         impacto = impacto_por_fator(fator, carteira, choque)   # fração do PL
@@ -325,10 +285,9 @@ if st.session_state.rodar:
             "Impacto (R$)": brl(impacto*pl, 0)
         })
     st.dataframe(pd.DataFrame(est_rows), use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
     # ===================== COMPLIANCE CVM/B3 =====================
-    st.markdown('<div class="card"><div class="h2">🏛️ Respostas CVM/B3</div>', unsafe_allow_html=True)
+    st.subheader("🏛️ Respostas CVM/B3")
     z95 = 1.644854
     var21_pct = z95 * sigma_port_d * np.sqrt(21) * 100.0  # em %
     brutos = [impacto_por_fator(f, carteira, ch) for f, ch in CENARIOS_PADRAO.items()]
@@ -401,10 +360,9 @@ if st.session_state.rodar:
     })
     st.dataframe(df_cvm, use_container_width=True)
     st.caption(explicacao_outros)
-    st.markdown('</div>', unsafe_allow_html=True)
 
-    # Downloads (sem drag & drop)
-    st.markdown('<div class="card"><div class="h2">📥 Downloads</div>', unsafe_allow_html=True)
+    # ===================== DOWNLOADS (sem upload) =====================
+    st.subheader("📥 Downloads")
     colA, colB = st.columns(2)
     with colA:
         out = BytesIO()
@@ -415,24 +373,29 @@ if st.session_state.rodar:
                          conf_label, f"{h} dias",
                          "VaR Paramétrico (Delta-Normal, com correlação)" if usar_corr else "VaR Paramétrico (Delta-Normal, ρ=0)"]
             }).to_excel(w, sheet_name="Metadados", index=False)
-            df_var.to_excel(w, sheet_name="VaR_por_Classe", index=False)
+            # Exporta dados “crus” também:
+            pd.DataFrame(carteira).to_excel(w, sheet_name="Carteira_Input", index=False)
+            df_var.to_excel(w, sheet_name="VaR_por_Classe_raw", index=False)
             pd.DataFrame(est_rows).to_excel(w, sheet_name="Cenarios_Estresse", index=False)
             df_cvm.to_excel(w, sheet_name="Respostas_CVM_B3", index=False)
-            pd.DataFrame({
-                "Métrica":["VaR_port_%","VaR_port_R$","Sigma_diario_%"],
-                "Valor":[f"{var_pct*100:.4f}%", brl(var_rs,2), f"{sigma_port_d*100:.4f}%"]
-            }).to_excel(w, sheet_name="Sumario", index=False)
         out.seek(0)
-        st.download_button("📊 Relatório Completo (Excel)", data=out,
-                           file_name=f"relatorio_var_{data['nome'].replace(' ','_')}.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(
+            "📊 Relatório Completo (Excel)",
+            data=out,
+            file_name=f"relatorio_var_{data['nome'].replace(' ','_')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
     with colB:
         out2 = BytesIO()
         df_cvm.to_excel(out2, index=False, engine="openpyxl")
         out2.seek(0)
-        st.download_button("🏛️ Respostas CVM/B3 (Excel)", data=out2,
-                           file_name=f"respostas_cvm_{data['nome'].replace(' ','_')}.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(
+            "🏛️ Respostas CVM/B3 (Excel)",
+            data=out2,
+            file_name=f"respostas_cvm_{data['nome'].replace(' ','_')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # ===================== RODAPÉ =====================
-st.markdown('<div class="footer">Feito com ❤️ <b>Finhealth</b></div>', unsafe_allow_html=True)
+st.caption("Feito com ❤️ Finhealth")
