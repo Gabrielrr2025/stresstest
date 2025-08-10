@@ -77,46 +77,9 @@ def label(texto: str):
 if "rodar" not in st.session_state: st.session_state.rodar = False
 if "corr_df" not in st.session_state: st.session_state.corr_df = None
 if "tentou" not in st.session_state: st.session_state.tentou = False
-if "tema" not in st.session_state: st.session_state.tema = "Escuro"  # padrão: escuro
 
-# ===================== TOGGLE DE TEMA (CANTO SUPERIOR DIREITO) =====================
-top_l, top_r = st.columns([1, 0.16])
-with top_r:
-    dark_mode = st.toggle("Tema escuro", value=(st.session_state.tema == "Escuro"),
-                          help="Alterna entre tema claro e escuro")
-    st.session_state.tema = "Escuro" if dark_mode else "Claro"
-
-# ===================== TEMA (CSS dinâmico) =====================
-CSS_LIGHT = """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-:root{
-  --bg:#f6f7fb; --card:#ffffff; --text:#111827; --muted:#6b7280; --line:#e5e7eb;
-  --primary:#075aff; --ok:#10b981; --warn:#f59e0b; --err:#ef4444;
-}
-*{font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont}
-[data-testid="stAppViewContainer"]{background:var(--bg)}
-.block-container{max-width:1100px; padding-top:.25rem}
-.card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:1rem 1.2rem; margin-bottom:1rem}
-.h1{font-size:1.6rem; font-weight:700; margin:0 0 .25rem}
-.h2{font-size:1.05rem; font-weight:700; color:var(--text); border-bottom:1px solid #f2f3f5; padding-bottom:.35rem; margin-bottom:.7rem}
-.kpi{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:1rem; text-align:center}
-.kpv{font-size:1.5rem; font-weight:700; color:var(--primary)}
-.kpl{font-size:.8rem; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:700}
-.progress{height:8px; background:#f3f4f6; border-radius:8px; overflow:hidden; margin:.5rem 0 .7rem}
-.progress > div{height:100%; background:linear-gradient(90deg,#22c55e,#16a34a)}
-.badge{display:inline-block; padding:.35rem .6rem; border-radius:8px; font-weight:600; font-size:.85rem; border:1px solid}
-.ok{color:var(--ok); background:rgba(16,185,129,.08); border-color:rgba(16,185,129,.25)}
-.warn{color:var(--warn); background:rgba(245,158,11,.08); border-color:rgba(245,158,11,.25)}
-.err{color:var(--err); background:rgba(239,68,68,.08); border-color:rgba(239,68,68,.25)}
-.lbl{font-weight:600; margin-bottom:4px}
-.help-err{color:var(--err); font-size:.85rem; margin-top:.25rem}
-.js-plotly-plot{border:1px solid var(--line); border-radius:12px}
-footer, #MainMenu, header{visibility:hidden}
-.footer{color:#6b7280; text-align:center; padding:1.6rem 0 1rem; border-top:1px solid #ececec; margin-top:1.2rem}
-</style>
-"""
-CSS_DARK = """
+# ===================== TEMA DARK (estilo ChatGPT) =====================
+st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 :root{
@@ -144,22 +107,35 @@ CSS_DARK = """
 footer, #MainMenu, header{visibility:hidden}
 .footer{color:#9aa6ff; text-align:center; padding:1.6rem 0 1rem; border-top:1px solid #223047; margin-top:1.2rem}
 </style>
-"""
-st.markdown(CSS_DARK if st.session_state.tema == "Escuro" else CSS_LIGHT, unsafe_allow_html=True)
-plotly_template = "plotly_dark" if st.session_state.tema == "Escuro" else "plotly_white"
+""", unsafe_allow_html=True)
+plotly_template = "plotly_dark"
 
-# ===================== SIDEBAR (apenas Parâmetros) =====================
+# ===================== SIDEBAR (Parâmetros formais) =====================
 with st.sidebar:
     st.header("⚙️ Parâmetros")
+
     horizonte_dias = st.selectbox("Horizonte (dias úteis)", [1, 10, 21], index=2,
                                   help="Período considerado para o cálculo do VaR.")
-    conf_label = st.selectbox("Confiança", ["95%", "99%"], index=0,
-                              help="Probabilidade associada ao nível de perda estimada.")
-    metodologia = st.selectbox("Metodologia",
-                               ["Sem correlação (soma em quadratura)", "Com correlação (matriz de correlação)"],
-                               index=0,
-                               help="Define se o portfólio considera dependência entre classes de ativos.")
-    usar_corr = metodologia.startswith("Com correlação")
+    conf_label = st.selectbox(
+        "Confiança",
+        ["95%", "99%"], index=0,
+        help=(
+            "Nível de confiança do VaR (quantil da distribuição de perdas).\n"
+            "• 95% (z≈1,645): aceita 5% de chance de exceder o VaR. Mais estável e menos conservador.\n"
+            "• 99% (z≈2,326): aceita 1% de chance de exceder o VaR. Mais conservador, porém mais sensível a outliers.\n"
+            "Escolha conforme a política de risco (ex.: CVM/B3 geralmente referencia 95% em 21 dias para reporte)."
+        )
+    )
+    metodologia = st.selectbox(
+        "Metodologia",
+        [
+            "VaR Paramétrico (Delta-Normal, ρ=0)",
+            "VaR Paramétrico (Delta-Normal, com correlação)"
+        ],
+        index=0,
+        help="Modelo paramétrico de variância-covariância. Com correlação utiliza matriz Corr para a agregação do risco."
+    )
+    usar_corr = metodologia.endswith("com correlação")
 
 # ===================== CABEÇALHO =====================
 st.markdown('<div class="card"><div class="h1">📊 Finhealth VaR</div>'
@@ -195,7 +171,16 @@ with st.form("form_fundo"):
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="card"><div class="h2">📊 Alocação por Classe</div>', unsafe_allow_html=True)
-    st.caption("Informe a distribuição por classe, a volatilidade anual sugerida e, se aplicável, a sensibilidade (elasticidade ao fator).")
+    st.caption(
+        "Informe a distribuição por classe, a volatilidade anual sugerida e, se aplicável, a sensibilidade."
+    )
+    with st.expander("ℹ️ O que é Sensibilidade (β)?", expanded=False):
+        st.write(
+            "- **Definição:** elasticidade do valor da classe ao seu fator de risco. "
+            "Um β=1,0 significa que um choque de **-1%** no fator gera **-1%** na parcela do PL dessa classe.\n"
+            "- **Exemplos:** β=0,5 → metade do efeito; β=-1,0 → efeito inverso; em juros pode ser interpretado como **DV01** normalizado.\n"
+            "- **Uso no estresse:** impacto = choque × β × (% da classe no PL)."
+        )
 
     carteira, soma = [], 0.0
     faltas_vol = {}
@@ -211,7 +196,7 @@ with st.form("form_fundo"):
             vol_a = st.number_input("", min_value=0.0, max_value=2.0, value=float(vol_sugerida),
                                     step=0.01, format="%.2f", key=f"v_{classe}", label_visibility="collapsed")
         with c:
-            label("Sensibilidade")
+            label("Sensibilidade (β)")
             sens = st.number_input("", min_value=-10.0, max_value=10.0, value=1.0, step=0.1,
                                    key=f"s_{classe}", label_visibility="collapsed")
 
@@ -273,7 +258,7 @@ if st.session_state.rodar:
         if (st.session_state.corr_df is None) or (list(st.session_state.corr_df.index) != classes):
             st.session_state.corr_df = montar_correlacao(classes)
         with st.expander("🔗 Matriz de correlação (opcional)"):
-            st.caption("A matriz deve ser simétrica e ter 1 na diagonal.")
+            st.caption("A matriz deve ser simétrica e ter 1 na diagonal. Ajuste se necessário.")
             edit = st.data_editor(st.session_state.corr_df.round(2), num_rows="fixed", use_container_width=True)
             M = edit.to_numpy(float); M = (M + M.T)/2.0; np.fill_diagonal(M, 1.0)
             st.session_state.corr_df = pd.DataFrame(M, index=classes, columns=classes)
@@ -398,7 +383,7 @@ if st.session_state.rodar:
         ],
         "Resposta": [
             f"{var21_pct:.4f}%",
-            "Paramétrico - Delta-Normal " + ("(com correlação)" if usar_corr else "(ρ=0, sem correlação)"),
+            "VaR Paramétrico (Delta-Normal)" + (" — com correlação" if usar_corr else " — ρ=0, sem correlação"),
             DESC_CENARIO["Ibovespa"],
             DESC_CENARIO["Juros-Pré"],
             DESC_CENARIO["Cupom Cambial"],
@@ -418,9 +403,9 @@ if st.session_state.rodar:
     st.caption(explicacao_outros)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Downloads
+    # Downloads (sem drag & drop)
     st.markdown('<div class="card"><div class="h2">📥 Downloads</div>', unsafe_allow_html=True)
-    colA, colB, colC = st.columns(3)
+    colA, colB = st.columns(2)
     with colA:
         out = BytesIO()
         with pd.ExcelWriter(out, engine="openpyxl") as w:
@@ -428,7 +413,7 @@ if st.session_state.rodar:
                 "Campo":["CNPJ","Fundo","Data","PL (R$)","Confiança","Horizonte","Método"],
                 "Valor":[data["cnpj"], data["nome"], data["data"].strftime("%d/%m/%Y"), brl(pl,2),
                          conf_label, f"{h} dias",
-                         "Delta-Normal " + ("com correlação" if usar_corr else "ρ=0")]
+                         "VaR Paramétrico (Delta-Normal, com correlação)" if usar_corr else "VaR Paramétrico (Delta-Normal, ρ=0)"]
             }).to_excel(w, sheet_name="Metadados", index=False)
             df_var.to_excel(w, sheet_name="VaR_por_Classe", index=False)
             pd.DataFrame(est_rows).to_excel(w, sheet_name="Cenarios_Estresse", index=False)
@@ -448,26 +433,6 @@ if st.session_state.rodar:
         st.download_button("🏛️ Respostas CVM/B3 (Excel)", data=out2,
                            file_name=f"respostas_cvm_{data['nome'].replace(' ','_')}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    with colC:
-        template = st.file_uploader("📋 Template B3/CVM", type=["xlsx"],
-                                    help="Carregue o modelo oficial para preenchimento automático.")
-        if template is not None:
-            try:
-                out_t = BytesIO()
-                wb = openpyxl.load_workbook(template); ws = wb.active
-                mapa = {col: str(ws.cell(row=3, column=col).value or "").strip().lower()
-                        for col in range(3, ws.max_column+1)}
-                for _, row in df_cvm.iterrows():
-                    p = row["Pergunta"].strip().lower()
-                    for col, txt in mapa.items():
-                        if p[:50] in txt or txt[:50] in p:
-                            ws.cell(row=6, column=col).value = row["Resposta"]; break
-                wb.save(out_t); out_t.seek(0)
-                st.download_button("📄 Template Preenchido", data=out_t,
-                                   file_name=f"template_preenchido_{data['nome'].replace(' ','_')}.xlsx",
-                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            except Exception as e:
-                st.error(f"Erro ao processar template: {e}")
 
 # ===================== RODAPÉ =====================
 st.markdown('<div class="footer">Feito com ❤️ <b>Finhealth</b></div>', unsafe_allow_html=True)
